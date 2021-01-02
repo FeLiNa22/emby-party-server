@@ -48,15 +48,16 @@ io.on("connection", (socket: Socket) => {
         console.log(socket.id + " requested to create a party");
 
         // generate a unique party id link
-        var partyId = null;
+        var partyId : string = "";
 
         var randOptions = {
             length: 6,
             charset: 'alphabetic',
             capitalization: 'uppercase'
         };
-
-        while (partyId == null || parties[partyId] === true) {
+        
+        // keeps looping until the randomly generated partyId is unique
+        while (partyId == "" || parties[partyId] === true) {
             partyId = randomstring.generate(randOptions);
         }
 
@@ -65,33 +66,34 @@ io.on("connection", (socket: Socket) => {
         parties[partyId] = true;
 
         // return the partyId to the user who created it
-        socket.emit("party created", partyId);
+        socket.emit("user created party", partyId);
+
         console.log(socket.id + " created party " + partyId);
     });
 
     // whenever we receive a join party request we try to join a party
-    socket.on("join party", (user: User, party: Party) => {
+    socket.on("join party", (partyId : string) => {
         
         // check the party exists
-        if (parties[party.id] === true) {
+        if (parties[partyId] === true) {
 
             // join the party
-            socket.join(party.id);
+            socket.join(partyId);
             // send response to all party members
-            socket.to(party.id).emit("user joined party", user);
+            socket.to(partyId).emit("user joined party", socket.id);
 
-            console.log(socket.id + " joined party " + party.id);
+            console.log(socket.id + " joined party " + partyId);
 
         } else {
 
-            socket.emit("user joined party", null);
+            socket.emit("error", "party doesn't exist");
 
         }
     });
 
     // send a message to the party
     socket.on("message party",  (party: Party, message: string) => {
-        socket.to(party.id).emit("message party", socket.id, message);
+        socket.to(party.id).emit("user message party", socket.id, message);
     });
 
     // when someone has left the party, but there are still ppl in it
