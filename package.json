@@ -5,8 +5,8 @@
   "main": "server.js",
   "scripts": {
     "dev": "nodemon --watch './src/**/*.ts' --exec npm start",
-    "build": "tsc -w",
-    "start": "npm run build && node ./build/server.js"
+    "build": "tsc",
+    "start": "npm run build && node ./build/Server.js"
   },
   "author": "",
   "license": "ISC",

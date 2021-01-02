@@ -26,15 +26,26 @@ api.get("/stats", (req, res) => {
 // parties contains a map of all the unique ids given to parties
 // it has key = partyId, value = true if party still exists
 const parties: Record<string, boolean> = {};
-const users: Record<string, User> = {};
 
 const httpServer = createServer();
-const io = new Server(httpServer);
+
+const io = new Server(httpServer, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"],
+    allowedHeaders: [],
+    credentials: false,
+  },
+});
 
 io.on("connection", (socket: Socket) => {
 
+    console.log(socket.id + " connected");
+
     // whenever we receive a create party request we create a party
-    socket.on("create party", function () {
+    socket.on("create party",  () => {
+
+        console.log(socket.id + " requested to create a party");
 
         // generate a unique party id link
         var partyId = null;
@@ -59,7 +70,7 @@ io.on("connection", (socket: Socket) => {
     });
 
     // whenever we receive a join party request we try to join a party
-    socket.on("join party", function (user: User, party: Party) {
+    socket.on("join party", (user: User, party: Party) => {
         
         // check the party exists
         if (parties[party.id] === true) {
@@ -79,7 +90,7 @@ io.on("connection", (socket: Socket) => {
     });
 
     // send a message to the party
-    socket.on("message party", function (party: Party, message: string) {
+    socket.on("message party",  (party: Party, message: string) => {
         socket.to(party.id).emit("message party", socket.id, message);
     });
 
@@ -94,7 +105,7 @@ io.on("connection", (socket: Socket) => {
     });
 
     // when everyone has left the rooms
-    socket.on('disconnect', function () {
+    socket.on('disconnect',  () => {
         for (const room of socket.rooms) {
             if (room !== socket.id) {
                 // set the map entry to false for each room
@@ -105,6 +116,6 @@ io.on("connection", (socket: Socket) => {
 
 });
 
-httpServer.listen(3000, function () {
-    console.log("listening on *:3000");
+httpServer.listen(4000, function () {
+    console.log("listening on *:4000");
 });
