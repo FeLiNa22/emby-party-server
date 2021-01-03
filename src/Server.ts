@@ -23,10 +23,6 @@ api.get("/stats", (req, res) => {
 });
 
 
-// parties contains a map of all the unique ids given to parties
-// it has key = partyId, value = true if party still exists
-const parties: Record<string, boolean> = {};
-
 const httpServer = createServer();
 
 const io = new Server(httpServer, {
@@ -57,13 +53,12 @@ io.on("connection", (socket: Socket) => {
         };
         
         // keeps looping until the randomly generated partyId is unique
-        while (partyId == "" || parties[partyId] === true) {
+        while (partyId == "" || io.sockets.adapter.rooms.get(partyId)) {
             partyId = randomstring.generate(randOptions);
         }
 
         // create and join the party
         socket.join(partyId);
-        parties[partyId] = true;
 
         // return the partyId to the user who created it
         socket.emit("user created party", partyId);
@@ -73,14 +68,15 @@ io.on("connection", (socket: Socket) => {
 
     // whenever we receive a join party request we try to join a party
     socket.on("join party", (partyId : string) => {
-        
+        console.log(socket.id + " trying to join party " + partyId)
         // check the party exists
-        if (parties[partyId] === true) {
+        if (io.sockets.adapter.rooms.get(partyId)) {
 
             // join the party
             socket.join(partyId);
+
             // send response to all party members
-            socket.to(partyId).emit("user joined party", socket.id);
+            io.in(partyId).emit("user joined party", socket.id, partyId);
 
             console.log(socket.id + " joined party " + partyId);
 
@@ -100,6 +96,7 @@ io.on("connection", (socket: Socket) => {
     socket.on("disconnecting", () => {
         for (const room of socket.rooms) {
             if (room !== socket.id) {
+                console.log(socket.id + " left party " + room);
                 // messages the room to notify everyone the person has left
                 socket.to(room).emit("user left party", socket.id);
             }
@@ -108,12 +105,7 @@ io.on("connection", (socket: Socket) => {
 
     // when everyone has left the rooms
     socket.on('disconnect',  () => {
-        for (const room of socket.rooms) {
-            if (room !== socket.id) {
-                // set the map entry to false for each room
-                parties[room] = false;
-            }
-        }
+        console.log(socket.id + " completely disconnected");
     });
 
 });
