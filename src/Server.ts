@@ -53,7 +53,7 @@ io.on("connection", (socket: Socket) => {
         };
         
         // keeps looping until the randomly generated partyId is unique
-        while (partyId == "" || io.sockets.adapter.rooms.get(partyId)) {
+        while (partyId == "" || io.sockets.adapter.rooms.has(partyId)) {
             partyId = randomstring.generate(randOptions);
         }
 
@@ -69,8 +69,9 @@ io.on("connection", (socket: Socket) => {
     // whenever we receive a join party request we try to join a party
     socket.on("join party", (partyId : string) => {
         console.log(socket.id + " trying to join party " + partyId)
+
         // check the party exists
-        if (io.sockets.adapter.rooms.get(partyId)) {
+        if (io.sockets.adapter.rooms.has(partyId)) {
 
             // join the party
             socket.join(partyId);
