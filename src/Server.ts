@@ -4,25 +4,20 @@ import { Server, Socket } from "socket.io";
 import randomstring from "randomstring";
 import { Party } from "./Party";
 import { User } from "./User";
+import { runInNewContext } from "vm";
 
-interface stats {
-    total_parties: number;
-    total_users: number;
-    active_users: number;
-    active_parties: number;
-    active_watch_time: number;
-}
+const apiPort = 5000;
+const socketPort = 4000;
 
-// Launch the localhost API that will display stats of parties
-const api = express();
-api.use(express.json());
-api.use(express.urlencoded({ extended: true }));
-const apiPort = 8080;
-/* Gets all the statistics of the entire server */
-api.get("/stats", (req, res) => {
-});
+/* MESSAGES */
+const PARTY_ERROR = "The code entered is invalid. Try again.";
 
+// maps partyId -> video url
+const parties = new Map<string, string>();
 
+/* ------------------ WEBSOCKET ------------------ */
+
+// Launch the localhost websocket server
 const httpServer = createServer();
 
 const io = new Server(httpServer, {
@@ -34,83 +29,149 @@ const io = new Server(httpServer, {
   },
 });
 
+// check if given party exists
+let partyExists = (partyId: string): boolean => {
+  return io.sockets.adapter.rooms.has(partyId);
+};
+
+// generate a unique party id
+let generatePartyId = (): string => {
+  var partyId: string = "";
+
+  var randOptions = {
+    length: 6,
+    charset: "alphabetic",
+    capitalization: "uppercase",
+  };
+
+  // keeps looping until the randomly generated partyId is unique
+  while (partyId == "" || partyExists(partyId)) {
+    partyId = randomstring.generate(randOptions);
+  }
+
+  return partyId;
+};
+
+/*
+Request -> Response
+  party:create -> response:created
+  party:join -> response:user-joining, response:joined
+  disconnecting -> response:user-left
+  party:message -> response:user-message
+*/
+
 io.on("connection", (socket: Socket) => {
+  console.log(socket.id + " connected");
 
-    console.log(socket.id + " connected");
+  // whenever we receive a create party request we create a party
+  socket.on("party:create", ({ url }, callback) => {
+    try {
+      console.log(socket.id + " requested to create a party");
 
-    // whenever we receive a create party request we create a party
-    socket.on("create party",  () => {
+      // generate a unique party Id
+      const partyId: string = generatePartyId();
 
-        console.log(socket.id + " requested to create a party");
+      // create and join the party
+      socket.join(partyId);
+      parties.set(partyId, url);
 
-        // generate a unique party id link
-        var partyId : string = "";
+      // return the partyId to the user who created it
+      callback({ partyId });
 
-        var randOptions = {
-            length: 6,
-            charset: 'alphabetic',
-            capitalization: 'uppercase'
-        };
+      console.log(socket.id + " created party " + partyId);
+    } catch {
+      console.log(socket.id + "tried to fuck wid da server");
+    }
+  });
+
+  // whenever we receive a join party request we try to join a party
+  socket.on("party:join", ({partyId}, callback) => {
+    try {
+      console.log(socket.id + " trying to join party " + partyId);
+
+      // check the party exists
+      if (partyExists(partyId)) {
         
-        // keeps looping until the randomly generated partyId is unique
-        while (partyId == "" || io.sockets.adapter.rooms.has(partyId)) {
-            partyId = randomstring.generate(randOptions);
-        }
-
-        // create and join the party
+        // join the party
         socket.join(partyId);
 
-        // return the partyId to the user who created it
-        socket.emit("user created party", partyId);
+        // send response to user that they have joined the party
+        callback({ partyId, url : parties.get(partyId) });
 
-        console.log(socket.id + " created party " + partyId);
-    });
+        // send response to all other party members
+        socket
+          .in(partyId)
+          .emit("response:user-joining", { uid: socket.id, partyId });
 
-    // whenever we receive a join party request we try to join a party
-    socket.on("join party", (partyId : string) => {
-        console.log(socket.id + " trying to join party " + partyId)
+        console.log(socket.id + " joined party " + partyId);
+      } else {
+        socket.emit("response:user-joined", {
+          error: { message: PARTY_ERROR },
+        });
+      }
+    } catch {
+      console.log(socket.id + "tried to fuck wid da server");
+    }
+  });
 
-        // check the party exists
-        if (io.sockets.adapter.rooms.has(partyId)) {
+  // send a message to the party
+  socket.on("party:message", ({ partyId, message }) => {
+    if (partyExists(partyId)) {
+      // emit the message to the entire party
+      socket
+        .to(partyId)
+        .emit("response:user-message", { uid: socket.id, message });
+    } else {
+      socket.emit("response:user-message", { error: { message: PARTY_ERROR } });
+    }
+  });
 
-            // join the party
-            socket.join(partyId);
+  // when someone has left the party, but there are still ppl in it
+  socket.on("disconnecting", () => {
+    for (const room of socket.rooms) {
+      if (room !== socket.id) {
+        // messages the room to notify everyone the person has left
+        socket.to(room).emit("response:user-left", socket.id);
 
-            // send response to all party members
-            io.in(partyId).emit("user joined party", socket.id, partyId);
-
-            console.log(socket.id + " joined party " + partyId);
-
-        } else {
-
-            socket.emit("error", "party doesn't exist");
-
-        }
-    });
-
-    // send a message to the party
-    socket.on("message party",  (party: Party, message: string) => {
-        socket.to(party.id).emit("user message party", socket.id, message);
-    });
-
-    // when someone has left the party, but there are still ppl in it
-    socket.on("disconnecting", () => {
-        for (const room of socket.rooms) {
-            if (room !== socket.id) {
-                console.log(socket.id + " left party " + room);
-                // messages the room to notify everyone the person has left
-                socket.to(room).emit("user left party", socket.id);
-            }
-        }
-    });
-
-    // when everyone has left the rooms
-    socket.on('disconnect',  () => {
-        console.log(socket.id + " completely disconnected");
-    });
-
+        console.log(socket.id + " left party " + room);
+      }
+    }
+  });
 });
 
-httpServer.listen(4000, function () {
-    console.log("listening on *:4000");
+/* ------------------ API ------------------ */
+
+// Launch the localhost API that will display stats of parties and get video url
+const api = express();
+api.use(express.json());
+api.use(express.urlencoded({ extended: true }));
+
+interface stats {
+  total_parties: number;
+  total_users: number;
+  active_users: number;
+  active_parties: number;
+  active_watch_time: number;
+}
+
+/* Gets all the statistics of the entire server */
+api.get("/stats", (req, res) => {});
+
+api.get("/party/:partyId", (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  console.log("someone is checking if party " + req.params.partyId + " exists");
+  if (partyExists(req.params.partyId)) {
+    res.send({ data : {url : parties.get(req.params.partyId), partyId : req.params.partyId }});
+  } else {
+    res.status(400).send({ error: { message: PARTY_ERROR } });
+  }
+});
+
+// start servers
+api.listen(apiPort, () => {
+  console.log(`api running on port ${apiPort}`);
+});
+
+httpServer.listen(socketPort, function () {
+  console.log(`web socket running on port ${socketPort}`);
 });
