@@ -10,7 +10,8 @@ const apiPort = 5000;
 const socketPort = 4000;
 
 /* MESSAGES */
-const PARTY_ERROR = "The code entered is invalid. Try again.";
+const PARTY_JOIN_ERROR = "The code entered is invalid. Try again.";
+const DEFAULT_ERROR = "Oops Something went wrong.";
 
 // maps partyId -> video url
 const parties = new Map<string, string>();
@@ -76,7 +77,7 @@ io.on("connection", (socket: Socket) => {
       parties.set(partyId, url);
 
       // return the partyId to the user who created it
-      callback({ partyId });
+      callback({ data: { partyId } });
 
       console.log(socket.id + " created party " + partyId);
     } catch {
@@ -85,28 +86,27 @@ io.on("connection", (socket: Socket) => {
   });
 
   // whenever we receive a join party request we try to join a party
-  socket.on("party:join", ({partyId}, callback) => {
+  socket.on("party:join", ({ partyId }, callback) => {
     try {
       console.log(socket.id + " trying to join party " + partyId);
 
       // check the party exists
       if (partyExists(partyId)) {
-        
         // join the party
         socket.join(partyId);
 
         // send response to user that they have joined the party
-        callback({ partyId, url : parties.get(partyId) });
+        callback({ data: { partyId, url: parties.get(partyId) } });
 
         // send response to all other party members
         socket
           .in(partyId)
-          .emit("response:user-joining", { uid: socket.id, partyId });
+          .emit("response:user-joined", { user: { sid: socket.id }, partyId });
 
         console.log(socket.id + " joined party " + partyId);
       } else {
-        socket.emit("response:user-joined", {
-          error: { message: PARTY_ERROR },
+        callback({
+          error: { message: PARTY_JOIN_ERROR },
         });
       }
     } catch {
@@ -116,13 +116,27 @@ io.on("connection", (socket: Socket) => {
 
   // send a message to the party
   socket.on("party:message", ({ partyId, message }) => {
-    if (partyExists(partyId)) {
-      // emit the message to the entire party
-      socket
-        .to(partyId)
-        .emit("response:user-message", { uid: socket.id, message });
-    } else {
-      socket.emit("response:user-message", { error: { message: PARTY_ERROR } });
+    try {
+      console.log(
+        socket.id + " sent message " + message + " to party " + partyId
+      );
+      if (partyExists(partyId)) {
+        try {
+          // send message to all party members (including caller)
+          io.to(partyId).emit("response:user-message", {
+            user: { sid: socket.id },
+            message,
+          });
+        } catch {
+          // if the message failed to send
+          socket.emit("error", { message: "Failed to send message" });
+        }
+      } else {
+        socket.emit("error", { message: PARTY_JOIN_ERROR });
+      }
+    } catch {
+      // something went wrong
+      console.log(socket.id + "tried to fuck wid da server");
     }
   });
 
@@ -131,8 +145,10 @@ io.on("connection", (socket: Socket) => {
     for (const room of socket.rooms) {
       if (room !== socket.id) {
         // messages the room to notify everyone the person has left
-        socket.to(room).emit("response:user-left", socket.id);
-
+        socket.to(room).emit("response:user-left", {
+          partyId: room,
+          user: { sid: socket.id },
+        });
         console.log(socket.id + " left party " + room);
       }
     }
@@ -161,9 +177,14 @@ api.get("/party/:partyId", (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   console.log("someone is checking if party " + req.params.partyId + " exists");
   if (partyExists(req.params.partyId)) {
-    res.send({ data : {url : parties.get(req.params.partyId), partyId : req.params.partyId }});
+    res.send({
+      data: {
+        url: parties.get(req.params.partyId),
+        partyId: req.params.partyId,
+      },
+    });
   } else {
-    res.status(400).send({ error: { message: PARTY_ERROR } });
+    res.status(400).send({ error: { message: PARTY_JOIN_ERROR } });
   }
 });
 
